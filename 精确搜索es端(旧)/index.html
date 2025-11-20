@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>表情包管理系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <style>
+        /* 修复移动端高度计算 */
+        @supports (-webkit-touch-callout: none) {
+            .h-screen-safe { height: -webkit-fill-available; }
+        }
+        /* 隐藏移动端滚动条但保留功能 */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-900 font-sans overflow-hidden">
+
+<div class="container mx-auto max-w-7xl p-2 md:p-6 h-[100dvh] flex flex-col">
+    <header class="flex-shrink-0 flex flex-col md:flex-row items-center justify-between bg-white p-2 md:px-5 md:py-3 rounded-2xl shadow-sm mb-2 md:mb-6 gap-2 md:gap-0 z-50 relative border border-gray-200">
+        
+        <h1 class="text-lg md:text-2xl font-bold text-blue-600 flex items-center gap-2 select-none transition-opacity">
+            <span class="text-xl md:text-2xl cursor-pointer hover:opacity-80" onclick="location.reload()">📂</span>
+            <span>bqbq 表情标签</span>
+        </h1>
+
+
+        <nav class="flex items-center gap-2 overflow-x-auto w-full md:w-auto pb-1 md:pb-0 no-scrollbar p-0.5">
+            <button id="nav-search" class="nav-btn-active flex-shrink-0">搜索</button>
+            <button id="nav-browse" class="nav-btn flex-shrink-0">浏览</button>
+            <button id="nav-tagging" class="nav-btn flex-shrink-0">打标签</button>
+            <button id="nav-upload" class="nav-btn flex-shrink-0">上传</button>
+            <button id="nav-io" class="nav-btn flex-shrink-0">数据管理</button>
+        </nav>
+    </header>
+    
+    <main class="relative flex-grow min-h-0 w-full">
+        
+        <div id="global-toast" class="fixed top-6 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full shadow-lg z-[100] hidden transition-opacity duration-300 flex items-center gap-2">
+            消息提示
+        </div>
+
+        <div id="search-view" class="h-full overflow-y-auto custom-scrollbar pb-10">
+            <div class="bg-white p-4 md:p-8 rounded-2xl shadow-md mb-6 border border-gray-100">
+                <h2 class="text-xl md:text-2xl font-bold mb-2 flex items-center gap-2 text-gray-800">🔍 精确搜索</h2>
+                <p class="text-xs md:text-sm text-gray-500 mb-4 md:mb-6">提示：包含标签为“且 (AND)”关系，必须同时满足。</p>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 mb-6">
+                    <div class="autocomplete-wrapper">
+                        <label class="block text-sm font-bold mb-2 text-gray-700">包含标签 (Must Include)</label>
+                        <input id="search-include" type="text" placeholder="例如: 熊猫头, 震惊..." class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-blue-500 focus:ring-2 focus:bg-white outline-none transition"/>
+                    </div>
+                    <div class="autocomplete-wrapper">
+                        <label class="block text-sm font-bold mb-2 text-gray-700">排除标签 (Exclude)</label>
+                        <input id="search-exclude" type="text" placeholder="例如: 模糊..." class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-red-500 focus:ring-2 focus:bg-white outline-none transition"/>
+                    </div>
+                </div>
+                <button id="search-button" class="w-full px-4 py-3.5 text-lg font-bold rounded-xl bg-blue-600 text-white shadow-lg hover:bg-blue-700 hover:shadow-blue-200 transition active:scale-[0.98]">开始搜索</button>
+            </div>
+
+            <div id="search-results-container" class="bg-white rounded-2xl shadow-md border border-gray-100 p-4 md:p-6 min-h-[200px]">
+                <div class="flex justify-between items-end mb-4 pb-2 border-b border-gray-100">
+                    <h3 id="results-title" class="text-lg md:text-xl font-bold text-gray-800">搜索结果</h3>
+                    <span id="results-count" class="text-xs md:text-sm font-mono text-gray-500 bg-gray-50 px-2 py-1 rounded">0 items</span>
+                </div>
+                <div id="results-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6"></div>
+                
+                <p id="results-message" class="text-gray-400 mt-10 text-center hidden font-medium">暂无搜索结果</p>
+                
+                <div class="text-center mt-8">
+                    <button id="search-load-more" class="hidden px-8 py-2.5 bg-white border border-gray-300 rounded-full shadow hover:bg-gray-50 transition font-bold text-gray-600">加载更多</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="browse-view" class="hidden h-full">
+            <div class="flex flex-col lg:grid lg:grid-cols-4 gap-4 md:gap-6 h-full">
+                
+                <div class="flex-1 min-h-0 lg:col-span-3 flex flex-col lg:h-full">
+                    <div class="bg-white rounded-2xl shadow-md border border-gray-100 flex-grow flex flex-col relative overflow-hidden">
+                        <div class="flex flex-wrap gap-2 justify-between items-center p-2 md:p-4 border-b border-gray-100 bg-white z-10">
+                            <div>
+                                <h2 id="browse-header-title" class="text-base md:text-lg font-bold text-gray-800">全部图片</h2>
+                                <p id="browse-status-text" class="text-[10px] md:text-xs text-gray-400 mt-0.5">下拉/滚动加载</p>
+                            </div>
+                            <div class="flex gap-1 bg-gray-100 p-1 rounded-xl scale-90 origin-right md:scale-100">
+                                <button class="filter-chip active" data-filter="all">全部</button>
+                                <button class="filter-chip" data-filter="untagged">未打标</button>
+                                <button class="filter-chip" data-filter="tagged">已打标</button>
+                            </div>
+                        </div>
+
+                        <div id="browse-scroll-container" class="flex-grow overflow-y-auto custom-scrollbar relative p-2 md:p-4 bg-gray-50/50">
+                            <div id="browse-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 md:gap-4 min-h-[200px]"></div>
+                            <div class="py-8 text-center">
+                                <p id="browse-empty-msg" class="text-gray-400 hidden mb-4 font-medium">暂无数据</p>
+                                <button id="browse-load-more" class="hidden px-6 py-2 bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 rounded-full text-sm font-bold transition shadow-sm">
+                                    点击加载更多
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="browse-sidebar" class="mobile-sidebar flex h-[54px] lg:h-full lg:col-span-1 bg-white p-0 lg:p-4 rounded-2xl shadow-md border border-gray-100 flex-col overflow-hidden z-20 transition-all duration-300 ease-in-out">
+                    <div class="sidebar-header flex justify-between items-center p-4 lg:p-0 mb-0 lg:mb-2 flex-shrink-0 cursor-pointer lg:cursor-default bg-white select-none">
+                        <h3 class="text-base md:text-lg font-bold text-gray-800 flex items-center gap-2">🏷️ 标签筛选</h3>
+                        <div class="flex items-center gap-2">
+                            <button id="browse-clear-filters" class="text-xs text-red-600 hover:bg-red-50 bg-white border border-red-100 px-2 py-1 rounded transition hidden font-bold" onclick="event.stopPropagation()">清除</button>
+                            <span class="lg:hidden text-gray-400 text-xs transform transition-transform duration-300 sidebar-arrow">▼</span>
+                        </div>
+                    </div>
+                    
+                    <div class="flex flex-col flex-grow overflow-hidden px-4 pb-4 lg:p-0">
+                        <div class="mb-2 flex-shrink-0 autocomplete-wrapper">
+                             <input id="browse-tag-search" type="text" placeholder="搜索/添加标签..." class="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition" onclick="event.stopPropagation()"/>
+                        </div>
+
+                        <div id="browse-tags-container" class="flex-grow flex flex-wrap content-start gap-2 mb-2 overflow-y-auto custom-scrollbar p-1 bg-gray-50/30 rounded-lg"></div>
+                        
+                        <div class="text-center mb-1 flex-shrink-0">
+                            <button id="browse-tags-load-more" class="text-xs text-blue-600 hover:underline hidden font-bold" onclick="event.stopPropagation()">加载更多标签</button>
+                        </div>
+                        
+                        <div class="mt-auto pt-2 border-t border-gray-100 flex-shrink-0">
+                            <div class="flex gap-2">
+                                <input id="browse-new-tag-input" type="text" placeholder="新标签..." class="flex-grow px-3 py-2 text-sm border border-gray-200 bg-gray-50 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" onclick="event.stopPropagation()"/>
+                                <button id="browse-add-tag-btn" class="px-3 py-2 text-sm font-bold bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition" onclick="event.stopPropagation()">+</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <div id="tagging-view" class="hidden h-full">
+            <div class="flex flex-col lg:grid lg:grid-cols-3 gap-4 md:gap-6 h-full">
+        
+                <div class="flex-1 min-h-0 lg:col-span-2 bg-white rounded-2xl shadow-md border border-gray-100 flex flex-col overflow-hidden">
+                    <div class="p-2 md:p-4 border-b border-gray-100 flex justify-between items-center flex-shrink-0 z-10 bg-white">
+                        <h2 class="text-lg md:text-xl font-bold text-gray-800 flex items-center gap-2">🏷️ 打标工作台</h2>
+                        
+                        <div class="flex gap-1 bg-gray-100 p-1 rounded-xl scale-90 origin-right md:scale-100">
+                            <button class="tagging-filter-chip filter-chip" data-filter="all">全部</button>
+                            <button class="tagging-filter-chip filter-chip active" data-filter="untagged">未打标</button>
+                            <button class="tagging-filter-chip filter-chip" data-filter="tagged">已打标</button>
+                        </div>
+                    </div>
+                    
+                    <div id="tagging-message" class="flex-grow flex flex-col items-center justify-center text-gray-400 p-10">
+                        <div class="text-5xl mb-4 grayscale opacity-30">🎉</div>
+                        <p id="message-text" class="font-medium">正在加载...</p>
+                    </div>
+
+                    <div id="tagging-workspace" class="hidden flex-col flex-grow p-3 md:p-6 h-full overflow-y-auto custom-scrollbar">
+                        
+                        <div id="tagging-card-container" class="flex-shrink-0 mb-4 w-full flex justify-center bg-gray-50 rounded-xl border border-gray-100 relative overflow-hidden max-h-[40dvh] lg:max-h-none lg:h-auto">
+                             </div>
+
+                        <div class="flex-shrink-0">
+                            <div class="mb-2 p-2 bg-blue-50 border border-blue-100 rounded-xl min-h-[40px] flex flex-wrap gap-2 items-center custom-scrollbar max-h-[80px] overflow-y-auto">
+                                <div id="current-tags-list" class="contents"></div>
+                                <p id="current-tags-placeholder" class="text-blue-400/70 text-xs font-medium italic w-full text-center">暂无标签</p>
+                            </div>
+
+                            <div class="flex gap-2 mb-3 relative autocomplete-wrapper">
+                                <input id="tag-input" type="text" placeholder="输入标签回车..." class="flex-grow px-3 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition text-sm"/>
+                                <button id="add-tag-btn" class="px-4 py-2 font-bold bg-blue-600 text-white rounded-xl hover:bg-blue-700 shadow-md transition whitespace-nowrap text-sm">添加</button>
+                            </div>
+
+                            <div class="flex gap-2 pb-2"> <button id="prev-button" class="flex-1 py-3 font-bold text-gray-600 bg-gray-100 rounded-xl hover:bg-gray-200 transition border border-gray-200 text-sm">上一张</button>
+                                <button id="next-button" class="flex-1 py-3 font-bold text-gray-600 bg-gray-100 rounded-xl hover:bg-gray-200 transition border border-gray-200 text-sm">下一张</button>
+                                <button id="save-next-button" class="flex-[2] py-3 font-bold text-white bg-green-600 rounded-xl shadow-lg hover:bg-green-700 transition shadow-green-200 text-sm">保存&下一个</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="tagging-sidebar" class="mobile-sidebar flex h-[54px] lg:h-full lg:col-span-1 bg-white p-0 lg:p-4 rounded-2xl shadow-md border border-gray-100 flex-col overflow-hidden z-20 transition-all duration-300 ease-in-out">
+                    <div class="sidebar-header flex justify-between items-center p-4 lg:p-0 mb-0 lg:mb-2 flex-shrink-0 cursor-pointer lg:cursor-default bg-white select-none">
+                        <h3 class="text-base md:text-lg font-bold text-gray-800 flex items-center gap-2">
+                            📚 常用标签库
+                        </h3>
+                        <span class="lg:hidden text-gray-400 text-xs transform transition-transform duration-300 sidebar-arrow">▼</span>
+                    </div>
+                    
+                    <div class="flex flex-col flex-grow overflow-hidden px-4 pb-4 lg:p-0">
+                        <div id="common-tags-container" class="flex-grow flex flex-wrap content-start gap-2 mb-2 overflow-y-auto custom-scrollbar p-1 bg-gray-50/30 rounded-lg"></div>
+                        <div class="text-center mb-1 flex-shrink-0">
+                            <button id="common-tags-load-more" class="text-xs text-blue-600 hover:underline hidden font-bold" onclick="event.stopPropagation()">加载更多</button>
+                        </div>
+                        <div class="mt-auto pt-2 border-t border-gray-100 flex-shrink-0">
+                            <div class="flex gap-2">
+                                <input id="new-common-tag-input" type="text" placeholder="新标签名" class="flex-grow px-3 py-2 text-sm border border-gray-200 bg-gray-50 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" onclick="event.stopPropagation()"/>
+                                <button id="add-common-tag-button" class="px-3 py-2 text-sm font-bold bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition" onclick="event.stopPropagation()">+</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+        
+        <div id="upload-view" class="hidden h-full">
+            <div class="flex flex-col lg:grid lg:grid-cols-3 gap-4 md:gap-6 h-full">
+                <div class="flex-1 min-h-0 lg:col-span-2 bg-white rounded-2xl shadow-md border border-gray-100 flex flex-col overflow-hidden">
+                    
+                    <div class="p-3 md:p-4 border-b border-gray-100 flex justify-between items-center bg-white z-10 flex-shrink-0">
+                        <h2 class="text-lg md:text-xl font-bold text-gray-800 flex items-center gap-2">
+                            📤 上传图片
+                        </h2>
+                        <div id="upload-area" class="relative cursor-pointer border-2 border-dashed border-blue-300 bg-blue-50 hover:bg-blue-100 rounded-lg transition group max-w-[120px] md:max-w-none">
+                             <input type="file" id="upload-file-input" accept="image/*" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" title="点击或拖入图片"/>
+                             <div class="px-2 py-1.5 text-blue-600 font-bold text-xs md:text-sm flex items-center gap-1 pointer-events-none justify-center">
+                                <span>☁️ 选择</span>
+                             </div>
+                        </div>
+                    </div>
+                    
+                    <div class="p-3 md:p-6 flex-grow overflow-y-auto custom-scrollbar relative">
+                        <div id="upload-message" class="hidden p-3 mb-4 text-center rounded-xl font-bold text-sm shadow-sm"></div>
+                        
+                        <div id="upload-workspace" class="hidden flex-col h-full">
+                            <div id="upload-card-container" class="mb-4 flex-shrink-0 max-h-[30dvh] lg:max-h-[50vh] w-full flex justify-center"></div>
+                            
+                            <div class="flex-shrink-0">
+                                <label class="text-xs font-bold text-gray-500 uppercase">当前标签</label>
+                                <div id="upload-current-tags-list" class="flex flex-wrap gap-2 mt-1 p-2 bg-gray-50 rounded-xl min-h-[40px] border border-gray-200 mb-2"></div>
+
+                                <div class="flex gap-2 mb-4 mt-2 relative autocomplete-wrapper">
+                                    <input id="upload-tag-input" type="text" placeholder="输入标签..." class="flex-grow px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition text-sm"/>
+                                    <button id="upload-add-tag-btn" class="px-4 py-2 font-bold bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition shadow-md text-sm">添加</button>
+                                </div>
+                                
+                                <div class="grid grid-cols-3 gap-3">
+                                    <button id="upload-cancel-btn" ...>取消</button>
+                                    <button id="upload-reselect-btn" class="col-span-1 py-2 font-bold text-blue-600 bg-blue-50 rounded-xl hover:bg-blue-100 transition text-sm">重选</button>
+                                    <button id="upload-save-button" ...>保存更改</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="upload-sidebar" class="mobile-sidebar flex h-[54px] lg:h-full lg:col-span-1 bg-white p-0 lg:p-4 rounded-2xl shadow-md border border-gray-100 flex-col overflow-hidden z-20 transition-all duration-300 ease-in-out">
+                    <div class="sidebar-header flex justify-between items-center p-4 lg:p-0 mb-0 lg:mb-2 flex-shrink-0 cursor-pointer lg:cursor-default bg-white select-none">
+                        <h3 class="text-base md:text-lg font-bold text-gray-800 flex items-center gap-2">
+                            📚 常用标签库
+                        </h3>
+                        <span class="lg:hidden text-gray-400 text-xs transform transition-transform duration-300 sidebar-arrow">▼</span>
+                    </div>
+
+                    <div class="flex flex-col flex-grow overflow-hidden px-4 pb-4 lg:p-0">
+                        <div id="upload-common-tags-container" class="flex-grow flex flex-wrap content-start gap-2 mb-2 overflow-y-auto custom-scrollbar p-1 bg-gray-50/30 rounded-lg"></div>
+                        <div class="text-center mb-1 flex-shrink-0">
+                            <button id="upload-tags-load-more" class="text-xs text-blue-600 hover:underline hidden font-bold" onclick="event.stopPropagation()">加载更多</button>
+                        </div>
+                        <div class="mt-auto pt-2 border-t border-gray-100 flex-shrink-0">
+                            <div class="flex gap-2">
+                                <input id="upload-new-common-tag-input" type="text" placeholder="新标签名" class="flex-grow px-3 py-2 text-sm border border-gray-200 bg-gray-50 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" onclick="event.stopPropagation()"/>
+                                <button id="upload-add-common-tag-button" class="px-3 py-2 text-sm font-bold bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition" onclick="event.stopPropagation()">+</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <div id="io-view" class="hidden h-full overflow-y-auto custom-scrollbar">
+            <div class="bg-white p-6 md:p-8 rounded-2xl shadow-md border border-gray-100 max-w-2xl mx-auto mt-4 md:mt-10">
+                <h2 class="text-2xl font-bold mb-8 text-center text-gray-800">💾 数据备份与恢复</h2>
+                
+                <div class="space-y-6">
+                    <div class="p-6 border border-blue-100 bg-blue-50 rounded-xl hover:border-blue-300 transition group cursor-pointer" id="export-button">
+                        <div class="flex items-center gap-4">
+                            <div class="w-12 h-12 bg-white rounded-full flex items-center justify-center text-2xl shadow-sm flex-shrink-0">📦</div>
+                            <div>
+                                <h3 class="font-bold text-lg text-blue-900">导出数据 (JSON)</h3>
+                                <p class="text-sm text-blue-600/70">下载包含所有图片关系、标签及同义词的完整备份。</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="p-6 border-2 border-dashed border-orange-200 bg-orange-50 rounded-xl hover:bg-orange-100 transition text-center">
+                        <div class="flex flex-col items-center gap-2 mb-4">
+                            <div class="text-3xl">📥</div>
+                            <h3 class="font-bold text-lg text-orange-900">导入数据</h3>
+                            <p class="text-sm text-orange-600/70">选择 JSON 文件进行恢复 (可能覆盖现有数据)</p>
+                        </div>
+                        <div class="flex gap-3 justify-center flex-wrap">
+                            <input type="file" id="import-file-input" accept=".json" class="hidden" />
+                            <button onclick="document.getElementById('import-file-input').click()" class="px-6 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition font-medium shadow-sm">
+                                选择文件
+                            </button>
+                            <button id="import-confirm-btn" class="px-6 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition font-bold shadow-md opacity-50 cursor-not-allowed" disabled>
+                                确认导入
+                            </button>
+                        </div>
+                        <p id="import-status" class="text-xs text-orange-600 font-bold mt-3 h-4"></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<div id="synonym-modal" class="fixed inset-0 z-[200] hidden items-center justify-center bg-black/40 backdrop-blur-sm transition-opacity">
+    <div id="synonym-modal-content" class="bg-white rounded-xl shadow-2xl w-[95%] max-w-md overflow-hidden transform transition-all scale-95 opacity-0 border border-gray-100">
+        <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+            <h3 class="text-lg font-bold text-gray-800">同义词组管理</h3>
+            <button id="close-modal" class="text-gray-400 hover:text-gray-600 text-2xl transition w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100">&times;</button>
+        </div>
+        
+        <div class="p-6">
+            <div class="mb-8 text-center">
+                <p class="text-xs text-gray-400 uppercase font-bold mb-2 tracking-wider">主标签 (Main Tag)</p>
+                <div id="modal-main-tag-display" class="inline-block px-6 py-2 bg-blue-600 text-white font-bold rounded-full text-lg shadow-md shadow-blue-200">
+                    TAG
+                </div>
+            </div>
+
+            <div class="mb-6">
+                <div class="flex justify-between items-end mb-2">
+                    <label class="text-xs font-bold text-gray-500 uppercase">同义词列表</label>
+                    <span class="text-[10px] text-blue-500 bg-blue-50 px-2 py-0.5 rounded font-medium">点击标签可设为主词</span>
+                </div>
+                <div id="modal-tags-list" class="flex flex-wrap gap-2 min-h-[100px] p-4 bg-gray-50 border border-gray-200 rounded-xl content-start"></div>
+            </div>
+
+            <div class="flex gap-3 pt-2">
+                <input id="modal-new-tag-input" type="text" placeholder="输入同义词..." class="flex-grow px-4 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white transition"/>
+                <button id="modal-add-tag-btn" class="px-5 py-2.5 bg-gray-800 text-white font-bold rounded-xl hover:bg-gray-900 text-sm transition shadow-md">添加</button>
+            </div>
+        </div>
+
+        <div class="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
+            <button id="modal-cancel-btn" class="px-5 py-2.5 text-gray-600 font-bold hover:bg-gray-200 rounded-xl transition text-sm">取消</button>
+            <button id="modal-save-btn" class="px-6 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 transition transform active:scale-[0.98] text-sm">保存更改</button>
+        </div>
+    </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
