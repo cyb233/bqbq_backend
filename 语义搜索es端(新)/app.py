@@ -667,10 +667,38 @@ class DataManager:
             "total": res['hits']['total']['value']
         }
 
-    def check_upload(self, file_obj):
-        md5_val = calculate_md5(file_stream=file_obj)
+    def check_md5_exists(self, md5_val: str):
+        """仅通过 MD5 判断是否已存在（不上传原图）"""
+        if not md5_val:
+            return {"exists": False, "error": True, "message": "缺少 md5 参数"}
+
+        md5_val = md5_val.lower()
+        if self.es.exists(index=IMAGE_INDEX, id=md5_val):
+            src = self.es.get(index=IMAGE_INDEX, id=md5_val)['_source']
+            return {
+                "exists": True,
+                "filename": src['filename'],
+                "tags": src.get('tags', []),
+                "url": f"/images/{src['filename']}",
+                "md5": md5_val,
+                "message": "图片已存在（未重复上传）"
+            }
+        return {"exists": False, "md5": md5_val, "message": "未找到重复图片"}
+
+    def check_upload(self, file_obj, provided_md5=None):
+        # 服务器仍然校验 MD5 与客户端声明一致，避免错误命名
+        md5_calculated = calculate_md5(file_stream=file_obj)
         file_obj.seek(0)
-        
+
+        if provided_md5 and provided_md5.lower() != md5_calculated:
+            return {
+                "exists": False,
+                "error": True,
+                "message": "MD5 校验失败，文件与声明值不一致"
+            }
+
+        md5_val = provided_md5.lower() if provided_md5 else md5_calculated
+
         if self.es.exists(index=IMAGE_INDEX, id=md5_val):
             src = self.es.get(index=IMAGE_INDEX, id=md5_val)['_source']
             return {
@@ -680,7 +708,17 @@ class DataManager:
             }
         
         original_ext = os.path.splitext(file_obj.filename)[1].lower()
-        if not original_ext: original_ext = ".jpg"
+        ext = original_ext[1:] if original_ext.startswith('.') else original_ext
+        # 统一 jpeg -> jpg
+        if ext == 'jpeg':
+            ext = 'jpg'
+        if not ext or ext not in ALLOWED_EXTS:
+            return {
+                "exists": False,
+                "error": True,
+                "message": f"不支持的文件类型，仅支持: {', '.join(sorted(ALLOWED_EXTS))}"
+            }
+        original_ext = f".{ext}"
         
         new_filename = f"{md5_val}{original_ext}"
         save_path = os.path.join(IMAGE_FOLDER, new_filename)
@@ -934,10 +972,14 @@ def import_data():
 @app.route('/api/delete_image', methods=['POST'])
 def del_img(): return jsonify({"success": dm.delete_image_file(request.json.get('filename'))[0]})
 
+@app.route('/api/check_md5_exists')
+def chk_md5():
+    return jsonify(dm.check_md5_exists(request.args.get('md5', '').strip()))
+
 @app.route('/api/check_upload', methods=['POST'])
 def chk_up(): 
     if 'file' not in request.files: return jsonify({"success": False, "message": "No file part"}), 400
-    return jsonify(dm.check_upload(request.files['file']))
+    return jsonify(dm.check_upload(request.files['file'], request.form.get('md5')))
 
 @app.route('/api/add_common_tag', methods=['POST'])
 def add_c(): return jsonify({"success": True}) 

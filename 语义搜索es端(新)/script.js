@@ -10,6 +10,139 @@ const debounce = (func, wait) => {
 };
 
 /**
+ * 轻量 MD5（改自 blueimp-md5，支持 ArrayBuffer）
+ */
+function md5cycle(x, k) {
+    let a = x[0], b = x[1], c = x[2], d = x[3];
+
+    a = ff(a, b, c, d, k[0], 7, -680876936);
+    d = ff(d, a, b, c, k[1], 12, -389564586);
+    c = ff(c, d, a, b, k[2], 17,  606105819);
+    b = ff(b, c, d, a, k[3], 22, -1044525330);
+    a = ff(a, b, c, d, k[4], 7, -176418897);
+    d = ff(d, a, b, c, k[5], 12,  1200080426);
+    c = ff(c, d, a, b, k[6], 17, -1473231341);
+    b = ff(b, c, d, a, k[7], 22, -45705983);
+    a = ff(a, b, c, d, k[8], 7,  1770035416);
+    d = ff(d, a, b, c, k[9], 12, -1958414417);
+    c = ff(c, d, a, b, k[10],17, -42063);
+    b = ff(b, c, d, a, k[11],22, -1990404162);
+    a = ff(a, b, c, d, k[12],7,  1804603682);
+    d = ff(d, a, b, c, k[13],12, -40341101);
+    c = ff(c, d, a, b, k[14],17, -1502002290);
+    b = ff(b, c, d, a, k[15],22,  1236535329);
+
+    a = gg(a, b, c, d, k[1], 5, -165796510);
+    d = gg(d, a, b, c, k[6], 9, -1069501632);
+    c = gg(c, d, a, b, k[11],14,  643717713);
+    b = gg(b, c, d, a, k[0], 20, -373897302);
+    a = gg(a, b, c, d, k[5], 5, -701558691);
+    d = gg(d, a, b, c, k[10],9,  38016083);
+    c = gg(c, d, a, b, k[15],14, -660478335);
+    b = gg(b, c, d, a, k[4], 20, -405537848);
+    a = gg(a, b, c, d, k[9], 5,  568446438);
+    d = gg(d, a, b, c, k[14],9, -1019803690);
+    c = gg(c, d, a, b, k[3], 14, -187363961);
+    b = gg(b, c, d, a, k[8], 20,  1163531501);
+    a = gg(a, b, c, d, k[13],5, -1444681467);
+    d = gg(d, a, b, c, k[2], 9, -51403784);
+    c = gg(c, d, a, b, k[7], 14,  1735328473);
+    b = gg(b, c, d, a, k[12],20, -1926607734);
+
+    a = hh(a, b, c, d, k[5], 4, -378558);
+    d = hh(d, a, b, c, k[8], 11, -2022574463);
+    c = hh(c, d, a, b, k[11],16,  1839030562);
+    b = hh(b, c, d, a, k[14],23, -35309556);
+    a = hh(a, b, c, d, k[1], 4, -1530992060);
+    d = hh(d, a, b, c, k[4], 11,  1272893353);
+    c = hh(c, d, a, b, k[7], 16, -155497632);
+    b = hh(b, c, d, a, k[10],23, -1094730640);
+    a = hh(a, b, c, d, k[13],4,  681279174);
+    d = hh(d, a, b, c, k[0], 11, -358537222);
+    c = hh(c, d, a, b, k[3], 16, -722521979);
+    b = hh(b, c, d, a, k[6], 23,  76029189);
+    a = hh(a, b, c, d, k[9], 4, -640364487);
+    d = hh(d, a, b, c, k[12],11, -421815835);
+    c = hh(c, d, a, b, k[15],16,  530742520);
+    b = hh(b, c, d, a, k[2], 23, -995338651);
+
+    a = ii(a, b, c, d, k[0], 6, -198630844);
+    d = ii(d, a, b, c, k[7], 10,  1126891415);
+    c = ii(c, d, a, b, k[14],15, -1416354905);
+    b = ii(b, c, d, a, k[5], 21, -57434055);
+    a = ii(a, b, c, d, k[12],6,  1700485571);
+    d = ii(d, a, b, c, k[3], 10, -1894986606);
+    c = ii(c, d, a, b, k[10],15, -1051523);
+    b = ii(b, c, d, a, k[1], 21, -2054922799);
+    a = ii(a, b, c, d, k[8], 6,  1873313359);
+    d = ii(d, a, b, c, k[15],10, -30611744);
+    c = ii(c, d, a, b, k[6], 15, -1560198380);
+    b = ii(b, c, d, a, k[13],21,  1309151649);
+    a = ii(a, b, c, d, k[4], 6, -145523070);
+    d = ii(d, a, b, c, k[11],10, -1120210379);
+    c = ii(c, d, a, b, k[2], 15,  718787259);
+    b = ii(b, c, d, a, k[9], 21, -343485551);
+
+    x[0] = add32(a, x[0]);
+    x[1] = add32(b, x[1]);
+    x[2] = add32(c, x[2]);
+    x[3] = add32(d, x[3]);
+}
+
+function cmn(q, a, b, x, s, t) {
+    a = add32(add32(a, q), add32(x, t));
+    return add32((a << s) | (a >>> (32 - s)), b);
+}
+function ff(a, b, c, d, x, s, t) { return cmn((b & c) | ((~b) & d), a, b, x, s, t); }
+function gg(a, b, c, d, x, s, t) { return cmn((b & d) | (c & (~d)), a, b, x, s, t); }
+function hh(a, b, c, d, x, s, t) { return cmn(b ^ c ^ d, a, b, x, s, t); }
+function ii(a, b, c, d, x, s, t) { return cmn(c ^ (b | (~d)), a, b, x, s, t); }
+
+function md51_array(a) {
+    let n = a.length;
+    let state = [1732584193, -271733879, -1732584194, 271733878];
+    let i;
+    for (i = 64; i <= n; i += 64) {
+        md5cycle(state, md5blk_array(a.subarray(i - 64, i)));
+    }
+    a = i - 64 < n ? a.subarray(i - 64) : new Uint8Array(0);
+
+    const tail = new Uint8Array(64);
+    tail.set(a);
+    tail[a.length] = 0x80;
+
+    const length = n * 8;
+    tail[56] = length & 0xff;
+    tail[57] = (length >>> 8) & 0xff;
+    tail[58] = (length >>> 16) & 0xff;
+    tail[59] = (length >>> 24) & 0xff;
+
+    md5cycle(state, md5blk_array(tail));
+    return state;
+}
+
+function md5blk_array(a) {
+    const blks = [];
+    for (let i = 0; i < 64; i += 4) {
+        blks[i >> 2] = a[i] + (a[i + 1] << 8) + (a[i + 2] << 16) + (a[i + 3] << 24);
+    }
+    return blks;
+}
+
+const hex_chr = '0123456789abcdef'.split('');
+function rhex(n) {
+    let s = '';
+    for (let j = 0; j < 4; j++) s += hex_chr[(n >> (j * 8 + 4)) & 0x0F] + hex_chr[(n >> (j * 8)) & 0x0F];
+    return s;
+}
+function hex(x) { return x.map(rhex).join(''); }
+function md5ArrayBuffer(buffer) { return hex(md51_array(new Uint8Array(buffer))); }
+
+function add32(a, b) {
+    return (a + b) & 0xFFFFFFFF;
+}
+
+/**
  * 自动补全组件
  */
 class TagAutocomplete {
@@ -206,7 +339,7 @@ class MemeApp {
             search: { offset: 0, limit: 40 },
             browse: { filter: 'all', tags: new Set(), offset: 0, limit: 40, tagsOffset: 0, minTags: 0, maxTags: -1 },
             tagging: { file: null, tags: new Set(), tagsOffset: 0, filter: 'untagged' },
-            upload: { file: null, tags: new Set(), tagsOffset: 0 },
+            upload: { file: null, tags: new Set(), tagsOffset: 0, md5: null, pending: false, localUrl: null },
         };
         this.commonTagsCacheKey = 'common_tags_cache_v1';
         this.commonTagsCacheTTL = 5 * 60 * 1000; // 5 minutes
@@ -241,6 +374,17 @@ class MemeApp {
         } catch (e) {
             console.error(e); // 方便开发者调试
             this.toast("API Error: " + e.message, "error");
+            return null;
+        }
+    }
+
+    async computeFileMD5(file) {
+        try {
+            const buffer = await file.arrayBuffer();
+            return md5ArrayBuffer(buffer);
+        } catch (e) {
+            console.error("MD5 计算失败", e);
+            this.toast("MD5 计算失败，请重试", "error");
             return null;
         }
     }
@@ -810,6 +954,20 @@ class MemeApp {
         });
     }
 
+    async discardPendingUpload() {
+        const s = this.state.upload;
+        if (s.pending && s.file) {
+            await this.api('/api/delete_image', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({filename: s.file})
+            });
+        }
+        if (s.localUrl) {
+            URL.revokeObjectURL(s.localUrl);
+        }
+    }
+
     // --- Search Logic ---
     bindSearch() {
             const fetcher = async (q) => (await this.fetchCommonTags(8, 0, q))?.tags || [];
@@ -1211,9 +1369,19 @@ class MemeApp {
         };
 
         const fileInp = document.getElementById('upload-file-input');
+        const allowedExts = ['jpg','jpeg','png','gif','webp'];
+        const allowedMime = ['image/jpeg','image/png','image/gif','image/webp'];
+        const setUploadMessage = (text, cls) => {
+            const msgEl = document.getElementById('upload-message');
+            msgEl.classList.remove('hidden');
+            msgEl.textContent = text;
+            msgEl.className = `mb-6 p-4 rounded-xl text-center font-bold text-sm animate-none ${cls}`;
+        };
         
         const handleFileSelect = async (file) => {
             if(!file) return;
+            await this.discardPendingUpload();
+            this.resetUploadView();
 
             // --- [新增] 前端大小限制 (100MB = 100 * 1024 * 1024 字节) ---
             const MAX_SIZE = 30 * 1024 * 1024; 
@@ -1224,35 +1392,75 @@ class MemeApp {
                 return;
             }
             // ---------------------------------------------------------
+            const ext = (file.name.split('.').pop() || '').toLowerCase();
+            const mimeOk = !file.type || allowedMime.includes(file.type);
+            if (!allowedExts.includes(ext) || !mimeOk) {
+                this.toast("仅支持 jpg/jpeg/png/gif/webp 格式的图片", "error");
+                document.getElementById('upload-file-input').value = '';
+                return;
+            }
 
-            const fd = new FormData(); fd.append('file', file);
+            // 生成本地预览地址
+            if (this.state.upload.localUrl) URL.revokeObjectURL(this.state.upload.localUrl);
+            const localUrl = URL.createObjectURL(file);
+            this.state.upload.localUrl = localUrl;
+
+            setUploadMessage("正在计算 MD5...", "bg-blue-50 text-blue-700 border border-blue-200");
+            const md5 = await this.computeFileMD5(file);
+            if (!md5) return;
+            this.state.upload.md5 = md5;
+
+            // 1) 客户端先用 MD5 判断是否已存在，避免上传原图
+            const existRes = await this.api(`/api/check_md5_exists?md5=${md5}`);
+            if (existRes && existRes.exists) {
+                setUploadMessage(existRes.message || "图片已存在", "bg-yellow-50 text-yellow-700 border border-yellow-200");
+                this.state.upload.file = existRes.filename;
+                this.state.upload.tags = new Set(existRes.tags || []);
+                this.state.upload.pending = false;
+
+                document.getElementById('upload-workspace').classList.remove('hidden');
+                const container = document.getElementById('upload-card-container');
+                container.innerHTML = '';
+                const card = this.createCard({
+                    filename: existRes.filename,
+                    url: localUrl, // 使用本地预览
+                    tags: existRes.tags || [],
+                    md5: md5
+                }, 'upload');
+                container.appendChild(card);
+                this.renderTagList('upload-current-tags-list', this.state.upload.tags, 'upload');
+                return;
+            }
+
+            // 2) 不存在再上传原图，同时带上客户端计算的 MD5 以校验
+            setUploadMessage("正在上传...", "bg-blue-50 text-blue-700 border border-blue-200");
+            const fd = new FormData(); 
+            fd.append('file', file);
+            fd.append('md5', md5);
             const res = await this.api('/api/check_upload', {method:'POST', body:fd});
             
-            const msgEl = document.getElementById('upload-message');
-            msgEl.classList.remove('hidden');
-            msgEl.textContent = res.message;
-            msgEl.className = `mb-6 p-4 rounded-xl text-center font-bold text-sm animate-none ${res.exists ? 'bg-yellow-50 text-yellow-700 border border-yellow-200' : 'bg-green-50 text-green-700 border border-green-200'}`;
+            if (!res) return;
+            setUploadMessage(res.message, res.exists ? 'bg-yellow-50 text-yellow-700 border border-yellow-200' : 'bg-green-50 text-green-700 border border-green-200');
             
             if(!res.error) {
-                        this.state.upload.file = res.filename;
-                        this.state.upload.tags = new Set(res.tags);
-                        
-                        document.getElementById('upload-workspace').classList.remove('hidden');
-                        //document.getElementById('upload-area').classList.add('hidden');
-                        
-                        // 【核心修改】使用 createCard 渲染上传预览
-                        const container = document.getElementById('upload-card-container');
-                        container.innerHTML = '';
-                        const card = this.createCard({
-                            filename: res.filename,
-                            url: res.url,
-                            tags: res.tags,
-                            md5: res.md5 // 确保 check_upload 返回了 md5
-                        }, 'upload');
-                        container.appendChild(card);
+                this.state.upload.file = res.filename;
+                this.state.upload.tags = new Set(res.tags);
+                this.state.upload.pending = !res.exists;
+                
+                document.getElementById('upload-workspace').classList.remove('hidden');
+                
+                const container = document.getElementById('upload-card-container');
+                container.innerHTML = '';
+                const card = this.createCard({
+                    filename: res.filename,
+                    url: localUrl, // 预览使用本地图片
+                    tags: res.tags,
+                    md5: res.md5 // 确保 check_upload 返回了 md5
+                }, 'upload');
+                container.appendChild(card);
 
-                        this.renderTagList('upload-current-tags-list', this.state.upload.tags, 'upload');
-                    }
+                this.renderTagList('upload-current-tags-list', this.state.upload.tags, 'upload');
+            }
         }
 
         fileInp.onchange = (e) => handleFileSelect(e.target.files[0]);
@@ -1265,11 +1473,15 @@ class MemeApp {
              if(!s.tags.size) return this.toast('请至少添加一个标签', 'error');
              await this.api('/api/save_tags', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({filename:s.file, tags:Array.from(s.tags)})});
              this.toast('上传保存成功');
+             this.state.upload.pending = false; // 已提交，保持数据
              // Reset UI to upload area to allow continuous upload
              this.resetUploadView();
         };
         
-        document.getElementById('upload-cancel-btn').onclick = () => this.resetUploadView();
+        document.getElementById('upload-cancel-btn').onclick = async () => {
+            await this.discardPendingUpload();
+            this.resetUploadView();
+        };
 
         document.getElementById('upload-add-common-tag-button').onclick = async () => {
             const inp = document.getElementById('upload-new-common-tag-input');
@@ -1290,6 +1502,12 @@ class MemeApp {
         document.getElementById('upload-file-input').value = '';
         this.state.upload.file = null;
         this.state.upload.tags.clear();
+        this.state.upload.md5 = null;
+        this.state.upload.pending = false;
+        if (this.state.upload.localUrl) {
+            URL.revokeObjectURL(this.state.upload.localUrl);
+            this.state.upload.localUrl = null;
+        }
     }
 
     // --- IO ---
