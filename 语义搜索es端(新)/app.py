@@ -21,13 +21,31 @@ from PIL import Image
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 IMAGE_FOLDER = os.path.join(BASE_DIR, 'meme_images')
 THUMBNAIL_FOLDER = os.path.join(BASE_DIR, 'meme_images_thumbnail')
-TRASH_DIR = os.path.join(BASE_DIR, 'trash_bin')
+TRASH_SUBDIR = 'trash_bin'
+TRASH_TAG = TRASH_SUBDIR
+TRASH_DIR = os.path.join(IMAGE_FOLDER, TRASH_SUBDIR)
 DB_DIR = os.path.join(BASE_DIR, 'db') 
 THUMBNAIL_MAX_SIZE = 600
 
-if not os.path.exists(TRASH_DIR): os.makedirs(TRASH_DIR, exist_ok=True)
-if not os.path.exists(IMAGE_FOLDER): os.makedirs(IMAGE_FOLDER, exist_ok=True)
-if not os.path.exists(THUMBNAIL_FOLDER): os.makedirs(THUMBNAIL_FOLDER, exist_ok=True)
+os.makedirs(IMAGE_FOLDER, exist_ok=True)
+os.makedirs(TRASH_DIR, exist_ok=True)
+os.makedirs(THUMBNAIL_FOLDER, exist_ok=True)
+
+LEGACY_TRASH_DIR = os.path.join(BASE_DIR, 'trash_bin')
+if os.path.exists(LEGACY_TRASH_DIR) and os.path.abspath(LEGACY_TRASH_DIR) != os.path.abspath(TRASH_DIR):
+    for entry in os.listdir(LEGACY_TRASH_DIR):
+        src_entry = os.path.join(LEGACY_TRASH_DIR, entry)
+        dst_entry = os.path.join(TRASH_DIR, entry)
+        if os.path.exists(dst_entry):
+            if os.path.isdir(dst_entry):
+                shutil.rmtree(dst_entry)
+            else:
+                os.remove(dst_entry)
+        shutil.move(src_entry, dst_entry)
+    try:
+        os.rmdir(LEGACY_TRASH_DIR)
+    except OSError:
+        pass
 
 # ES 配置
 ELASTICSEARCH_HOSTS = ['http://localhost:9200']
@@ -197,6 +215,38 @@ class DataManager:
             traceback.print_exc()
             return None
 
+    def _is_trash_path(self, rel_path):
+        if not rel_path:
+            return False
+        rel_path = rel_path.replace('\\', '/')
+        return rel_path.startswith(f"{TRASH_SUBDIR}/")
+
+    def _ensure_trash_tag(self, tags, should_be_trash):
+        base_tags = set(tags or [])
+        if should_be_trash:
+            base_tags.add(TRASH_TAG)
+        else:
+            base_tags.discard(TRASH_TAG)
+        return sorted(base_tags)
+
+    def _move_thumbnail_file(self, src_rel, dst_rel):
+        src_thumb = self._path_join(THUMBNAIL_FOLDER, self._thumbnail_rel_path(src_rel))
+        dst_thumb = self._path_join(THUMBNAIL_FOLDER, self._thumbnail_rel_path(dst_rel))
+        if not os.path.exists(src_thumb):
+            return
+        os.makedirs(os.path.dirname(dst_thumb), exist_ok=True)
+        if os.path.abspath(src_thumb) == os.path.abspath(dst_thumb):
+            return
+        if os.path.exists(dst_thumb):
+            try:
+                os.remove(dst_thumb)
+            except Exception:
+                pass
+        try:
+            shutil.move(src_thumb, dst_thumb)
+        except Exception as e:
+            print(f"[Thumb Move] 无法移动缩略图: {e}")
+
     def _build_image_payload(self, filename, tags=None, md5=None, score=None):
         thumb_rel = self._ensure_thumbnail_exists(filename)
         thumb_url = f"/thumbnails/{thumb_rel}" if thumb_rel else None
@@ -207,6 +257,7 @@ class DataManager:
             "thumbnail_url": thumb_url or f"/images/{filename}",
             "md5": md5 if md5 else os.path.splitext(os.path.basename(filename))[0]
         }
+        data["is_trashed"] = TRASH_TAG in (data["tags"] or [])
         if score is not None:
             data["score"] = score
         return data
@@ -286,7 +337,7 @@ class DataManager:
             
             try:
                 # 1. 获取 ES 现状 (白名单)
-                es_id_map = {} # 记录 MD5 -> 旧Filename
+                es_doc_map = {}
                 es_ids = set()
                 try:
                     if self.es.indices.exists(index=IMAGE_INDEX):
@@ -294,15 +345,14 @@ class DataManager:
                             self.es,
                             index=IMAGE_INDEX,
                             query={"query": {"match_all": {}}},
-                            _source=["filename"],
+                            _source=["filename","tags"],
                             scroll='2m'
                         )
                         for hit in scan_gen:
-                            fname = hit['_source'].get('filename') 
                             mid = hit['_id']
                             es_ids.add(mid)
-                            if fname:
-                                es_id_map[mid] = fname
+                            src = hit.get('_source') or {}
+                            es_doc_map[mid] = src
                 except Exception as e:
                     print(f"[Sync] ES 读取失败: {e}")
 
@@ -345,34 +395,39 @@ class DataManager:
 
                 # --- 新增逻辑：处理已存在但路径变更的文件 (去重与移动) ---
                 update_actions = []
-                for mid in disk_ids:
-                    if mid in es_id_map:
-                        old_path = es_id_map[mid]
-                        new_path = disk_md5_map[mid]
-                        
-                        # 如果当前扫描到的路径与ES记录的旧路径不同
-                        if old_path != new_path:
-                            # 1. 准备更新 ES 记录指向新路径
-                            update_actions.append({
-                                "_op_type": "update",
-                                "_index": IMAGE_INDEX,
-                                "_id": mid,
-                                "doc": {"filename": new_path}
-                            })
-                            
-                            # 2. 物理删除旧文件 (去重)
-                            old_full_path = os.path.join(IMAGE_FOLDER, old_path)
-                            new_full_path = os.path.join(IMAGE_FOLDER, new_path)
-                            
-                            # 确保不是同一个文件的不同路径表达（安全检查）
-                            if os.path.abspath(old_full_path) != os.path.abspath(new_full_path):
-                                if os.path.exists(old_full_path):
-                                    try:
-                                        os.remove(old_full_path)
-                                        print(f"[Sync] 去重: 已删除旧位置文件 {old_path}，保留新位置 {new_path}")
-                                    except Exception as e:
-                                        print(f"[Sync] 删除旧文件失败: {e}")
+                for mid in disk_ids & es_ids:
+                    doc = es_doc_map.get(mid, {})
+                    old_path = doc.get('filename') or ''
+                    old_tags = doc.get('tags') or []
+                    new_path = disk_md5_map[mid]
+                    path_changed = old_path != new_path
+                    should_be_trash = self._is_trash_path(new_path)
+                    has_trash = TRASH_TAG in old_tags
+                    tags_need_update = should_be_trash != has_trash
+                    doc_updates = {}
+                    if path_changed:
+                        doc_updates["filename"] = new_path
+                    if tags_need_update:
+                        doc_updates["tags"] = self._ensure_trash_tag(old_tags, should_be_trash)
 
+                    if doc_updates:
+                        update_actions.append({
+                            "_op_type": "update",
+                            "_index": IMAGE_INDEX,
+                            "_id": mid,
+                            "doc": doc_updates
+                        })
+
+                    if path_changed and old_path:
+                        old_full_path = os.path.join(IMAGE_FOLDER, old_path)
+                        new_full_path = os.path.join(IMAGE_FOLDER, new_path)
+                        if os.path.abspath(old_full_path) != os.path.abspath(new_full_path):
+                            if os.path.exists(old_full_path):
+                                try:
+                                    os.remove(old_full_path)
+                                    print(f'[Sync] 去重: 已删除旧位置文件 {old_path}，保留新位置 {new_path}')
+                                except Exception as e:
+                                    print(f'[Sync] 删除旧文件失敗: {e}')
                 if update_actions:
                     print(f"[Sync] 更新文件路径: {len(update_actions)} 条")
                     helpers.bulk(self.es, update_actions)
@@ -395,7 +450,7 @@ class DataManager:
                             "_source": {
                                 "filename": rel_fname,
                                 "md5": mid,
-                                "tags": []
+                                "tags": self._ensure_trash_tag([], self._is_trash_path(rel_fname))
                             }
                         })
                     if actions:
@@ -465,6 +520,22 @@ class DataManager:
             variants.update(self.synonym_map[root])
         return list(variants)
 
+    def _includes_trash_tag(self, tags):
+        if not tags:
+            return False
+        for tag in tags:
+            if isinstance(tag, str) and tag.strip().lower() == TRASH_TAG:
+                return True
+        return False
+
+    def _apply_trash_filter(self, bool_clause, allow_trash=False):
+        if allow_trash:
+            return
+        must_not = bool_clause.setdefault("must_not", [])
+        clause = {"term": {"tags.raw": TRASH_TAG}}
+        if clause not in must_not:
+            must_not.append(clause)
+
     # --- 业务逻辑 ---
 
     def get_next_untagged_image(self, current_filename=None, filter_type='untagged'):
@@ -480,6 +551,8 @@ class DataManager:
         if current_filename:
              query["bool"]["must"].append({"range": {"filename": {"gt": current_filename}}})
         
+        self._apply_trash_filter(query["bool"])
+
         res = self.es.search(index=IMAGE_INDEX, body={"query": query, "sort": sort_order, "size": 1})
         
         hits = res['hits']['hits']
@@ -492,12 +565,13 @@ class DataManager:
         # 循环回到开头
         if current_filename:
             if filter_type == 'untagged':
-                q2 = {"bool": {"must_not": [{"exists": {"field": "tags"}}]}}
+                q2 = {"bool": {"must_not": [{"exists": {"field": "tags"}}], "must": []}}
             elif filter_type == 'tagged':
-                q2 = {"bool": {"must": [{"exists": {"field": "tags"}}]}}
+                q2 = {"bool": {"must": [{"exists": {"field": "tags"}}], "must_not": []}}
             else:
-                q2 = {"match_all": {}}
+                q2 = {"bool": {"must": [{"match_all": {}}], "must_not": []}}
                 
+            self._apply_trash_filter(q2["bool"])
             res = self.es.search(index=IMAGE_INDEX, body={"query": q2, "sort": sort_order, "size": 1})
             if res['hits']['hits']:
                 src = res['hits']['hits'][0]['_source']
@@ -573,6 +647,8 @@ class DataManager:
             variants = self.get_all_variants(tag)
             must_not_clauses.append({"terms": {"tags.raw": variants}})
 
+        allow_trash = self._includes_trash_tag(include)
+
         body = {
             "query": {
                 "bool": {
@@ -584,6 +660,7 @@ class DataManager:
             "size": limit,
             "sort": [{"_score": "desc"}, {"filename": "asc"}]
         }
+        self._apply_trash_filter(body["query"]["bool"], allow_trash=allow_trash)
         return self._format_es_response(self.es.search(index=IMAGE_INDEX, body=body))
 
 
@@ -672,7 +749,7 @@ class DataManager:
             "from": offset,
             "size": limit
         }
-        
+        self._apply_trash_filter(body["query"]["bool"])
         res = self.es.search(index=IMAGE_INDEX, body=body)
         return self._format_es_response(res)
 
@@ -695,6 +772,8 @@ class DataManager:
 
         # 3. 新增逻辑：处理标签数量筛选 (Script Query)
         # 如果 min=0 且 max=None(无上限)，则不需要过滤，节省性能
+        allow_trash = self._includes_trash_tag(tags)
+
         if min_tags is not None or max_tags is not None:
             script_source = """
                 int count = doc.containsKey('tags.raw') ? doc['tags.raw'].size() : 0;
@@ -726,6 +805,7 @@ class DataManager:
             "size": limit,
             "sort": [{"filename": "asc"}] 
         }
+        self._apply_trash_filter(query["bool"], allow_trash=allow_trash)
         return self._format_es_response(self.es.search(index=IMAGE_INDEX, body=body))
 
     def _format_es_response(self, res):
@@ -812,46 +892,64 @@ class DataManager:
 
 
 
-    def delete_image_file(self, filename):
-        # 1. 提取文件名 (实现扁平化，如 "subdir/md5.jpg" -> "md5.jpg")
-        # 移动到回收站时，建议扁平化处理，防止回收站层级过深，或者仅保留文件名
-        # 这里简单的只保留文件名放入回收站
-        basename = os.path.basename(filename)
-        doc_id = basename.rsplit('.', 1)[0]
-        
+    def delete_image_file(self, filename, restore=False):
+        rel_path = ((filename or '').replace('\\', '/')).strip('/')
+        if not rel_path:
+            return False, "缺少图片路径"
+        doc_id = os.path.basename(rel_path).rsplit('.', 1)[0]
+        if restore:
+            if not self._is_trash_path(rel_path):
+                return False, "该图片不在回收站"
+            prefix = f"{TRASH_SUBDIR}/"
+            dst_rel = rel_path[len(prefix):] if rel_path.startswith(prefix) else rel_path
+        else:
+            if self._is_trash_path(rel_path):
+                return False, "该图片已在回收站"
+            dst_rel = f"{TRASH_SUBDIR}/{rel_path}" if rel_path else TRASH_SUBDIR
+        src_rel = rel_path
+        src_abs = self._path_join(IMAGE_FOLDER, src_rel)
+        dst_abs = self._path_join(IMAGE_FOLDER, dst_rel)
+        if not os.path.exists(src_abs):
+            return False, "源文件不存在"
+        dst_dir = os.path.dirname(dst_abs)
+        if dst_dir and not os.path.exists(dst_dir):
+            os.makedirs(dst_dir, exist_ok=True)
+        if restore:
+            if os.path.exists(dst_abs):
+                return False, "目标路径已有文件，请先处理冲突"
+        else:
+            if os.path.exists(dst_abs):
+                try:
+                    os.remove(dst_abs)
+                except Exception as e:
+                    print(f"[Delete Image] 无法提前删除目标文件: {e}")
         try:
-            # 2. 删除 ES 索引
-            self.es.delete(index=IMAGE_INDEX, id=doc_id)
-            
-            # 3. 处理物理文件
-            src = os.path.join(IMAGE_FOLDER, filename)
-            
-            if os.path.exists(src):
-                # 构造回收站的目标路径 (扁平化路径)
-                dst = os.path.join(TRASH_DIR, basename)
-                thumb_path = self._path_join(THUMBNAIL_FOLDER, self._thumbnail_rel_path(filename))
-                if os.path.exists(thumb_path):
-                    try:
-                        os.remove(thumb_path)
-                    except Exception:
-                        pass
-                
-                # --- 强制覆盖逻辑 ---
-                # 如果回收站里已有同名文件（扁平化容易导致重名），先删掉旧的
-                if os.path.exists(dst):
-                    try:
-                        os.remove(dst)
-                    except OSError:
-                        pass # 如果删不掉旧的(例如被占用)，move 可能会失败，但先尝试
-                
-                # 移动新文件
-                shutil.move(src, dst)
-                
-            return True, "已删除"
+            shutil.move(src_abs, dst_abs)
         except Exception as e:
-            print(f"[Delete Error] {e}")
+            print(f"[Delete Image] 移动文件失败: {e}")
             return False, str(e)
-        
+        self._move_thumbnail_file(src_rel, dst_rel)
+        tags = []
+        try:
+            src_doc = self.es.get(index=IMAGE_INDEX, id=doc_id)['_source']
+            tags = src_doc.get('tags', []) or []
+        except es_exceptions.NotFoundError:
+            tags = []
+        except Exception as e:
+            print(f"[Delete Image] 读取索引失败: {e}")
+        keep_trash = not restore
+        new_tags = self._ensure_trash_tag(tags, keep_trash)
+        update_doc = {
+            "filename": dst_rel,
+            "tags": new_tags,
+            "md5": doc_id,
+        }
+        try:
+            self.es.update(index=IMAGE_INDEX, id=doc_id, body={"doc": update_doc, "doc_as_upsert": True})
+        except Exception as e:
+            print(f"[Delete Image] 更新索引失败: {e}")
+        message = "已恢复" if restore else "已移入回收站"
+        return True, message
 
     def update_tag_group(self, main_tag, synonyms):
         self.synonym_map[main_tag] = synonyms
@@ -1050,7 +1148,14 @@ def import_data():
         return jsonify({"success": False, "message": str(e)}), 400
     
 @app.route('/api/delete_image', methods=['POST'])
-def del_img(): return jsonify({"success": dm.delete_image_file(request.json.get('filename'))[0]})
+def del_img():
+    data = request.get_json(force=True, silent=True) or {}
+    filename = data.get('filename')
+    if not filename:
+        return jsonify({"success": False, "message": "缺少 filename 参数"}), 400
+    restore = bool(data.get('restore'))
+    success, message = dm.delete_image_file(filename, restore=restore)
+    return jsonify({"success": success, "message": message})
 
 @app.route('/api/check_md5_exists')
 def chk_md5():
@@ -1165,11 +1270,13 @@ def get_by_offset_api():
     
     try:
         # 2. 直接在此处执行 ES 查询逻辑
+        bool_query = {"must": [{"match_all": {}}], "must_not": []}
+        self._apply_trash_filter(bool_query)
         body = {
             "from": offset,
             "size": 1,
-            "query": {"match_all": {}},     # 匹配所有文档
-            "sort": [{"filename": "asc"}]   # 强制按文件名排序，确保顺序固定
+            "query": {"bool": bool_query},
+            "sort": [{"filename": "asc"}]
         }
         
         # 使用全局对象 dm 的 es 客户端进行查询

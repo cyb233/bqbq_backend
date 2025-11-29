@@ -854,28 +854,40 @@ class MemeApp {
                 imgEl.onclick = (e) => { e.stopPropagation(); this.openImageViewer(item); };
             }
 
-            div.querySelector('.delete-btn').onclick = async (e) => {
-                e.stopPropagation();
-                if(confirm(`确认将 "${item.filename}" 移入回收站并删除记录？`)) {
+            const deleteBtn = div.querySelector('.delete-btn');
+            if (deleteBtn) {
+                const isTrashedBtn = Boolean(item.is_trashed);
+                deleteBtn.title = isTrashedBtn ? '恢复' : '移除';
+                deleteBtn.setAttribute('aria-label', '移除/恢复');
+                deleteBtn.classList.toggle('bg-red-500/80', !isTrashedBtn);
+                deleteBtn.classList.toggle('hover:bg-red-600', !isTrashedBtn);
+                deleteBtn.classList.toggle('bg-emerald-600/80', isTrashedBtn);
+                deleteBtn.classList.toggle('hover:bg-emerald-700', isTrashedBtn);
+                deleteBtn.classList.toggle('text-white', true);
+                deleteBtn.onclick = async (e) => {
+                    e.stopPropagation();
+                    const actionLabel = isTrashedBtn ? '恢复' : '移除';
+                    if (!confirm(actionLabel + ' "' + item.filename + '"？')) return;
                     const res = await this.api('/api/delete_image', {
-                        method: 'POST', 
-                        headers: {'Content-Type': 'application/json'}, 
-                        body: JSON.stringify({filename: item.filename})
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({filename: item.filename, restore: isTrashedBtn})
                     });
-                    
-                    if (res && res.success) {
-                        this.toast('已删除');
-                        // 根据上下文处理后续逻辑
-                        if (context === 'browse') {
-                            div.remove(); // 列表模式：移除卡片
-                        } else if (context === 'tagging') {
-                            this.loadTaggingImage(); // 打标模式：加载下一张
-                        } else if (context === 'upload') {
-                            this.resetUploadView(); // 上传模式：重置
-                        }
+                    if (!res) return;
+                    if (!res.success) {
+                        this.toast(res.message || (actionLabel + '失败'), 'error');
+                        return;
                     }
-                }
-            };
+                    this.toast(res.message || (isTrashedBtn ? '已恢复' : '已移入回收站'));
+                    if (context === 'browse') {
+                        div.remove();
+                    } else if (context === 'tagging') {
+                        this.loadTaggingImage();
+                    } else if (context === 'upload') {
+                        this.resetUploadView();
+                    }
+                };
+            }
 
             return div;
         }
