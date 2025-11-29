@@ -344,6 +344,7 @@ class MemeApp {
         this.commonTagsCacheKey = 'common_tags_cache_v1';
         this.commonTagsCacheTTL = 5 * 60 * 1000; // 5 minutes
         this.commonTagsCache = this.restoreCommonTagsCache();
+        this.cachedCommonTagsList = this.buildCachedCommonTagsList();
         this.taggingHistory = [];
         this.modalManager = new SynonymModalManager(this);
         this.viewer = null;
@@ -433,11 +434,50 @@ class MemeApp {
 
     clearCommonTagsCache() {
         this.commonTagsCache = {};
+        this.cachedCommonTagsList = [];
         try { localStorage.removeItem(this.commonTagsCacheKey); } catch (e) { /* ignore */ }
     }
 
     commonTagsCacheKeyBuilder(limit, offset, query) {
         return `${limit}|${offset}|${(query || '').trim().toLowerCase()}`;
+    }
+
+    buildCachedCommonTagsList() {
+        const map = new Map();
+        Object.values(this.commonTagsCache || {}).forEach(entry => {
+            const list = (entry && entry.data && Array.isArray(entry.data.tags)) ? entry.data.tags : [];
+            list.forEach(item => {
+                const tagName = (item && item.tag ? String(item.tag) : '').trim();
+                if (!tagName) return;
+                const key = tagName.toLowerCase();
+                const synonyms = Array.isArray(item.synonyms) ? item.synonyms.filter(Boolean) : [];
+                if (!map.has(key)) {
+                    map.set(key, { tag: tagName, synonyms: [...new Set(synonyms)] });
+                } else if (synonyms.length) {
+                    const existing = map.get(key).synonyms;
+                    synonyms.forEach(s => {
+                        if (!existing.includes(s)) existing.push(s);
+                    });
+                }
+            });
+        });
+        return Array.from(map.values());
+    }
+
+    searchCachedCommonTags(query = "", limit = 8) {
+        if (!Array.isArray(this.cachedCommonTagsList) || !this.cachedCommonTagsList.length) {
+            this.cachedCommonTagsList = this.buildCachedCommonTagsList();
+        }
+        const q = (query || '').trim().toLowerCase();
+        const candidates = this.cachedCommonTagsList || [];
+        const filtered = q
+            ? candidates.filter(item => {
+                const nameHit = item.tag && item.tag.toLowerCase().includes(q);
+                const synHit = Array.isArray(item.synonyms) && item.synonyms.some(s => String(s).toLowerCase().includes(q));
+                return nameHit || synHit;
+            })
+            : candidates;
+        return filtered.slice(0, limit);
     }
 
     async fetchCommonTags(limit = 60, offset = 0, query = "") {
@@ -453,6 +493,7 @@ class MemeApp {
             this.commonTagsCache[key] = { ts: now, data: res };
             this.trimCommonTagsCache();
             this.persistCommonTagsCache();
+            this.cachedCommonTagsList = this.buildCachedCommonTagsList();
         }
         return res;
     }
@@ -1021,7 +1062,7 @@ class MemeApp {
 
     // --- Search Logic ---
     bindSearch() {
-            const fetcher = async (q) => (await this.fetchCommonTags(8, 0, q))?.tags || [];
+            const fetcher = async (q) => this.searchCachedCommonTags(q, 8);
             // Autocomplete binding
             const incInput = document.getElementById('search-include');
             const excInput = document.getElementById('search-exclude');
@@ -1162,8 +1203,8 @@ class MemeApp {
             this.refreshBrowseFilters();
             this.loadBrowse(false);
         };
-        
-        const fetcher = async (q) => (await this.fetchCommonTags(8, 0, q))?.tags || [];
+
+        const fetcher = async (q) => this.searchCachedCommonTags(q, 8);
         
         // 1. 标签库搜索 -> 过滤
         new TagAutocomplete(document.getElementById('browse-tag-search'), (tag) => {
@@ -1237,7 +1278,7 @@ class MemeApp {
 
     // --- Tagging Logic ---
     bindTagging() {
-        const fetcher = async (q) => (await this.fetchCommonTags(8, 0, q))?.tags || [];
+        const fetcher = async (q) => this.searchCachedCommonTags(q, 8);
         
         // 1. 打标输入框
         new TagAutocomplete(document.getElementById('tag-input'), (t) => this.addTagToState('tagging', t), fetcher);
@@ -1404,7 +1445,7 @@ class MemeApp {
 
     // --- Upload Logic (Updated with Layout & Autocomplete) ---
     bindUpload() {
-        const fetcher = async (q) => (await this.fetchCommonTags(8, 0, q))?.tags || [];
+        const fetcher = async (q) => this.searchCachedCommonTags(q, 8);
         
         // 1. 上传打标输入框
         new TagAutocomplete(document.getElementById('upload-tag-input'), (t) => this.addTagToState('upload', t), fetcher);
