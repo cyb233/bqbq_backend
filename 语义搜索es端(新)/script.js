@@ -149,6 +149,7 @@ class SynonymModalManager {
                 body: JSON.stringify({ main_tag: this.currentMain, synonyms: synonyms })
             });
             this.app.toast(`标签组已更新: ${this.currentMain}`);
+            this.app.clearCommonTagsCache();
             this.close();
             this.app.refreshCurrentViewTags();
         };
@@ -207,6 +208,9 @@ class MemeApp {
             tagging: { file: null, tags: new Set(), tagsOffset: 0, filter: 'untagged' },
             upload: { file: null, tags: new Set(), tagsOffset: 0 },
         };
+        this.commonTagsCacheKey = 'common_tags_cache_v1';
+        this.commonTagsCacheTTL = 5 * 60 * 1000; // 5 minutes
+        this.commonTagsCache = this.restoreCommonTagsCache();
         this.taggingHistory = [];
         this.modalManager = new SynonymModalManager(this);
         this.init();
@@ -239,6 +243,73 @@ class MemeApp {
             this.toast("API Error: " + e.message, "error");
             return null;
         }
+    }
+
+    // --- Common Tag Cache Helpers ---
+    restoreCommonTagsCache() {
+        try {
+            const raw = localStorage.getItem(this.commonTagsCacheKey);
+            if (!raw) return {};
+            const parsed = JSON.parse(raw);
+            const now = Date.now();
+            const fresh = {};
+            Object.entries(parsed).forEach(([k, v]) => {
+                if (v && typeof v.ts === 'number' && now - v.ts < this.commonTagsCacheTTL) {
+                    fresh[k] = v;
+                }
+            });
+            // 把过期的清理掉，避免缓存无限增�?
+            localStorage.setItem(this.commonTagsCacheKey, JSON.stringify(fresh));
+            return fresh;
+        } catch (e) {
+            console.warn('Restore common tag cache failed', e);
+            return {};
+        }
+    }
+
+    persistCommonTagsCache() {
+        try {
+            localStorage.setItem(this.commonTagsCacheKey, JSON.stringify(this.commonTagsCache));
+        } catch (e) {
+            console.warn('Persist common tag cache failed', e);
+        }
+    }
+
+    trimCommonTagsCache() {
+        const entries = Object.entries(this.commonTagsCache);
+        const MAX = 30;
+        if (entries.length <= MAX) return;
+        entries.sort((a, b) => a[1].ts - b[1].ts);
+        while (entries.length > MAX) {
+            const [oldest] = entries.shift();
+            delete this.commonTagsCache[oldest];
+        }
+    }
+
+    clearCommonTagsCache() {
+        this.commonTagsCache = {};
+        try { localStorage.removeItem(this.commonTagsCacheKey); } catch (e) { /* ignore */ }
+    }
+
+    commonTagsCacheKeyBuilder(limit, offset, query) {
+        return `${limit}|${offset}|${(query || '').trim().toLowerCase()}`;
+    }
+
+    async fetchCommonTags(limit = 60, offset = 0, query = "") {
+        const key = this.commonTagsCacheKeyBuilder(limit, offset, query);
+        const now = Date.now();
+        const cached = this.commonTagsCache[key];
+        if (cached && now - cached.ts < this.commonTagsCacheTTL) {
+            return cached.data;
+        }
+
+        const res = await this.api(`/api/get_common_tags?limit=${limit}&offset=${offset}&query=${encodeURIComponent(query)}`);
+        if (res && res.tags) {
+            this.commonTagsCache[key] = { ts: now, data: res };
+            this.trimCommonTagsCache();
+            this.persistCommonTagsCache();
+        }
+        return res;
     }
 
 
@@ -638,7 +709,7 @@ class MemeApp {
         
         const limit = 60;
         const offset = this.state[context].tagsOffset;
-        const res = await this.api(`/api/get_common_tags?limit=${limit}&offset=${offset}&query=${encodeURIComponent(query)}`);
+        const res = await this.fetchCommonTags(limit, offset, query);
         
         if (res && res.tags) {
             const fragment = document.createDocumentFragment();
@@ -704,6 +775,7 @@ class MemeApp {
                      e.stopPropagation();
                      if(confirm(`确认从库中删除 "${t}"？`)) {
                         await this.api('/api/delete_common_tag', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({tag:t})});
+                        this.clearCommonTagsCache();
                         this.loadCommonTags(containerId, context);
                      }
                 };
@@ -740,7 +812,7 @@ class MemeApp {
 
     // --- Search Logic ---
     bindSearch() {
-            const fetcher = async (q) => (await this.api(`/api/get_common_tags?limit=8&query=${q}`))?.tags || [];
+            const fetcher = async (q) => (await this.fetchCommonTags(8, 0, q))?.tags || [];
             // Autocomplete binding
             const incInput = document.getElementById('search-include');
             const excInput = document.getElementById('search-exclude');
@@ -882,7 +954,7 @@ class MemeApp {
             this.loadBrowse(false);
         };
         
-        const fetcher = async (q) => (await this.api(`/api/get_common_tags?limit=8&query=${q}`))?.tags || [];
+        const fetcher = async (q) => (await this.fetchCommonTags(8, 0, q))?.tags || [];
         
         // 1. 标签库搜索 -> 过滤
         new TagAutocomplete(document.getElementById('browse-tag-search'), (tag) => {
@@ -897,12 +969,14 @@ class MemeApp {
             document.getElementById('browse-new-tag-input').value = tag;
         }, fetcher);
 
-        document.getElementById('browse-add-tag-btn').onclick = () => {
+        document.getElementById('browse-add-tag-btn').onclick = async () => {
             const inp = document.getElementById('browse-new-tag-input');
-            if(inp.value.trim()) {
-                this.api('/api/add_common_tag', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({tag:inp.value.trim()})})
-                .then(() => { inp.value=''; this.loadCommonTags('browse-tags-container', 'browse'); });
-            }
+            const val = inp.value.trim();
+            if(!val) return;
+            await this.api('/api/add_common_tag', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({tag:val})});
+            this.clearCommonTagsCache();
+            inp.value='';
+            this.loadCommonTags('browse-tags-container', 'browse');
         };
     }
     
@@ -954,7 +1028,7 @@ class MemeApp {
 
     // --- Tagging Logic ---
     bindTagging() {
-        const fetcher = async (q) => (await this.api(`/api/get_common_tags?limit=8&query=${q}`))?.tags || [];
+        const fetcher = async (q) => (await this.fetchCommonTags(8, 0, q))?.tags || [];
         
         // 1. 打标输入框
         new TagAutocomplete(document.getElementById('tag-input'), (t) => this.addTagToState('tagging', t), fetcher);
@@ -1021,10 +1095,14 @@ class MemeApp {
         };
         
         // 库管理相关
-        document.getElementById('add-common-tag-button').onclick = () => {
+        document.getElementById('add-common-tag-button').onclick = async () => {
             const inp = document.getElementById('new-common-tag-input');
-            if(inp.value.trim()) this.api('/api/add_common_tag', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({tag:inp.value.trim()})})
-            .then(()=> { inp.value=''; this.loadCommonTags('common-tags-container', 'tagging'); });
+            const val = inp.value.trim();
+            if(!val) return;
+            await this.api('/api/add_common_tag', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({tag:val})});
+            this.clearCommonTagsCache();
+            inp.value='';
+            this.loadCommonTags('common-tags-container', 'tagging');
         };
         document.getElementById('common-tags-load-more').onclick = () => this.loadCommonTags('common-tags-container', 'tagging', true);
     }
@@ -1117,7 +1195,7 @@ class MemeApp {
 
     // --- Upload Logic (Updated with Layout & Autocomplete) ---
     bindUpload() {
-        const fetcher = async (q) => (await this.api(`/api/get_common_tags?limit=8&query=${q}`))?.tags || [];
+        const fetcher = async (q) => (await this.fetchCommonTags(8, 0, q))?.tags || [];
         
         // 1. 上传打标输入框
         new TagAutocomplete(document.getElementById('upload-tag-input'), (t) => this.addTagToState('upload', t), fetcher);
@@ -1193,10 +1271,14 @@ class MemeApp {
         
         document.getElementById('upload-cancel-btn').onclick = () => this.resetUploadView();
 
-        document.getElementById('upload-add-common-tag-button').onclick = () => {
+        document.getElementById('upload-add-common-tag-button').onclick = async () => {
             const inp = document.getElementById('upload-new-common-tag-input');
-            if(inp.value.trim()) this.api('/api/add_common_tag', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({tag:inp.value.trim()})})
-            .then(()=> { inp.value=''; this.loadCommonTags('upload-common-tags-container', 'upload'); });
+            const val = inp.value.trim();
+            if(!val) return;
+            await this.api('/api/add_common_tag', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({tag:val})});
+            this.clearCommonTagsCache();
+            inp.value='';
+            this.loadCommonTags('upload-common-tags-container', 'upload');
         };
         document.getElementById('upload-tags-load-more').onclick = () => this.loadCommonTags('upload-common-tags-container', 'upload', true);
     }
