@@ -156,7 +156,7 @@ class DataManager:
 
     def _thumbnail_rel_path(self, filename):
         base, _ = os.path.splitext(filename)
-        return f"{base}.jpg"
+        return f"{base}_thumbnail.jpg"
 
     def _extract_random_frame(self, img: Image.Image):
         frames = getattr(img, "n_frames", 1)
