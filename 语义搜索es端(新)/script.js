@@ -348,6 +348,11 @@ class MemeApp {
         this.taggingHistory = [];
         this.modalManager = new SynonymModalManager(this);
         this.viewer = null;
+        this.confirmModal = null;
+        this.confirmMessageEl = null;
+        this.confirmOkBtn = null;
+        this.confirmCancelBtn = null;
+        this.pendingConfirmResolver = null;
         this.init();
     }
 
@@ -661,6 +666,67 @@ class MemeApp {
         }, duration);
     }
 
+    bindConfirmModal() {
+        this.confirmModal = document.getElementById('custom-confirm');
+        if (!this.confirmModal) return;
+        this.confirmMessageEl = this.confirmModal.querySelector('[data-confirm-message]');
+        this.confirmOkBtn = this.confirmModal.querySelector('[data-confirm-ok]');
+        this.confirmCancelBtn = this.confirmModal.querySelector('[data-confirm-cancel]');
+
+        const finalize = (result) => this.finalizeConfirm(result);
+
+        if (this.confirmOkBtn) {
+            this.confirmOkBtn.onclick = (e) => { e.preventDefault(); finalize(true); };
+        }
+        if (this.confirmCancelBtn) {
+            this.confirmCancelBtn.onclick = (e) => { e.preventDefault(); finalize(false); };
+        }
+
+        this.confirmModal.addEventListener('click', (e) => {
+            if (e.target === this.confirmModal) {
+                finalize(false);
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (this.pendingConfirmResolver && e.key === 'Escape') {
+                e.preventDefault();
+                finalize(false);
+            }
+        });
+    }
+
+    finalizeConfirm(result) {
+        if (this.pendingConfirmResolver) {
+            this.pendingConfirmResolver(result);
+            this.pendingConfirmResolver = null;
+        }
+        if (!this.confirmModal) return;
+        this.confirmModal.classList.add('hidden');
+        this.confirmModal.classList.remove('flex');
+    }
+
+    customConfirm(message, options = {}) {
+        if (!this.confirmModal) {
+            return Promise.resolve(confirm(message));
+        }
+        if (this.pendingConfirmResolver) {
+            this.finalizeConfirm(false);
+        }
+
+        if (this.confirmMessageEl) this.confirmMessageEl.textContent = message;
+        if (this.confirmOkBtn) this.confirmOkBtn.textContent = options.okText || '确认';
+        if (this.confirmCancelBtn) this.confirmCancelBtn.textContent = options.cancelText || '取消';
+
+        this.confirmModal.classList.remove('hidden');
+        this.confirmModal.classList.add('flex');
+        if (this.confirmOkBtn) this.confirmOkBtn.focus();
+
+        return new Promise(resolve => {
+            this.pendingConfirmResolver = resolve;
+        });
+    }
+
     init() {
         this.bindNav();
         this.bindSearch();
@@ -668,6 +734,7 @@ class MemeApp {
         this.bindTagging();
         this.bindUpload();
         this.bindIO();
+        this.bindConfirmModal();
         
         this.bindSidebarEvents();
         this.setupImageViewer();
@@ -790,7 +857,7 @@ class MemeApp {
                         </button>
 
                         <div class="absolute bottom-2 right-2 z-30 flex flex-col items-end group/info">
-                            <div class="mb-2 hidden group-hover/info:block w-48 p-2.5 bg-gray-900/90 backdrop-blur text-white text-[10px] rounded-lg shadow-xl border border-gray-700 z-40 animate-[fadeIn_0.1s_ease-out]">
+                            <div class="mb-2 hidden group-hover/info:block w-44 p-2.5 bg-gray-900/90 backdrop-blur text-white text-[10px] rounded-lg shadow-xl border border-gray-700 z-40 animate-[fadeIn_0.1s_ease-out]">
                                 <p class="font-bold text-gray-100 mb-1.5 border-b border-gray-700 pb-1 break-all whitespace-normal leading-tight">${item.filename}</p>
                                 <p class="font-mono text-gray-400 break-all whitespace-normal leading-tight">MD5: ${md5Display}</p>
                             </div>
@@ -867,7 +934,7 @@ class MemeApp {
                 deleteBtn.onclick = async (e) => {
                     e.stopPropagation();
                     const actionLabel = isTrashedBtn ? '恢复' : '移除';
-                    if (!confirm(actionLabel + ' "' + item.filename + '"？')) return;
+                    if (!await this.customConfirm(actionLabel + ' "' + item.filename + '"？')) return;
                     const res = await this.api('/api/delete_image', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
@@ -1021,7 +1088,7 @@ class MemeApp {
                 smallDel.innerHTML = "&times;";
                 smallDel.onclick = async (e) => {
                      e.stopPropagation();
-                     if(confirm(`确认从库中删除 "${t}"？`)) {
+                     if(await this.customConfirm(`确认从标签库中删除 "${t}"？`)) {
                         await this.api('/api/delete_common_tag', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({tag:t})});
                         this.clearCommonTagsCache();
                         this.loadCommonTags(containerId, context);

@@ -107,6 +107,16 @@
 
 
 
+        <div id="custom-confirm" class="fixed inset-0 z-[200] hidden items-center justify-center bg-black/40 backdrop-blur-sm px-4">
+            <div class="bg-white rounded-2xl border border-gray-200 shadow-2xl w-fit max-w-[90vw] min-w-[260px] p-6 space-y-4 text-center">
+                <p data-confirm-message class="text-base font-semibold text-gray-900 leading-relaxed"></p>
+                <div class="flex flex-wrap justify-end gap-3">
+                    <button data-confirm-cancel class="px-5 py-2 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition">取消</button>
+                    <button data-confirm-ok class="px-5 py-2 rounded-xl bg-blue-600 text-sm font-semibold text-white hover:bg-blue-700 transition">确认</button>
+                </div>
+            </div>
+        </div>
+
         <div id="search-view" class="h-full overflow-y-auto custom-scrollbar pb-10">
             <div class="bg-white p-4 md:p-8 rounded-2xl shadow-md mb-6 border border-gray-100">
                 <div class="flex justify-between items-center mb-4">
