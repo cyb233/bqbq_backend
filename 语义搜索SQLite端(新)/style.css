@@ -1,0 +1,173 @@
+/* --- 导航按钮样式 (标准 CSS 重写版) --- */
+/* --- 导航按钮：实体功能按钮风格 --- */
+/* --- 导航按钮：精致缩小版 (实体风格) --- */
+
+/* 默认状态 (未选中/选中) */
+.nav-btn,
+.nav-btn-active {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 12px;
+    font-size: 14px;
+    font-weight: 700;
+    border-radius: 8px;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+}
+
+.nav-btn {
+    cursor: pointer;
+    background-color: #f3f4f6;
+    color: #4b5563;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+
+/* 悬停效果 */
+.nav-btn:hover {
+    background-color: #e5e7eb;
+    color: #111827;
+    border-color: #d1d5db;
+}
+
+/* 点击效果 */
+.nav-btn:active {
+    transform: scale(0.96);
+    background-color: #d1d5db;
+}
+
+/* 选中状态 (Active) */
+.nav-btn-active {
+    cursor: default;
+    background-color: #2563eb;
+    color: white;
+    border: 1px solid #2563eb;
+    box-shadow: 0 2px 4px -1px rgba(37, 99, 235, 0.3);
+    transform: scale(1.02);
+}
+/* 基础样式 */
+body { 
+    font-family: "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; 
+    -webkit-font-smoothing: antialiased; 
+}
+
+/* 滚动条优化 - 统一应用 */
+.custom-scrollbar::-webkit-scrollbar,
+.autocomplete-items::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track,
+.autocomplete-items::-webkit-scrollbar-track {
+    background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb,
+.autocomplete-items::-webkit-scrollbar-thumb {
+    background-color: #cbd5e1;
+    border-radius: 3px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover,
+.autocomplete-items::-webkit-scrollbar-thumb:hover {
+    background-color: #94a3b8;
+}
+
+/* 筛选 Chips (如果这些还是失效，也可以移到 HTML 的 style 标签里，或者用标准 CSS 写) */
+/* 这里用标准 CSS 重写一下，防止失效 */
+.filter-chip {
+    padding: 0.25rem 0.75rem;
+    border-radius: 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    background-color: white;
+    color: #6b7280;
+    border: 1px solid #e5e7eb;
+    transition: all 0.2s;
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+.filter-chip:hover {
+    background-color: #f9fafb;
+    border-color: #d1d5db;
+    color: #1f2937;
+}
+.filter-chip.active {
+    background-color: #2563eb;
+    color: white;
+    border-color: #2563eb;
+    box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.1), 0 2px 4px -1px rgba(37, 99, 235, 0.06);
+}
+
+/* 自动补全下拉 */
+.autocomplete-wrapper { position: relative; }
+.autocomplete-items {
+    position: absolute;
+    border: 1px solid #e2e8f0;
+    border-top: none;
+    z-index: 999;
+    top: calc(100% + 4px); left: 0; right: 0;
+    background-color: white;
+    border-radius: 0.75rem; 
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    max-height: 280px;
+    overflow-y: auto; 
+    padding: 6px;
+}
+.autocomplete-items div {
+    padding: 10px 16px;
+    cursor: pointer;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    display: flex;
+    align-items: center;
+    transition: all 0.15s ease;
+    margin-bottom: 2px;
+}
+.autocomplete-items div:hover, .autocomplete-active { 
+    background-color: #eff6ff; 
+    color: #1d4ed8; 
+}
+
+/* 常用标签库的文字左右 padding 多 1px，避免文字紧贴边缘，并在竖直方向增加 2px 空间 */
+.common-tag-text {
+    padding-inline: calc(0.75rem + 1px);
+    padding-block: 2px;
+}
+
+/* 图片信息弹窗在宽度上随视口变化 */
+.image-info-tooltip {
+    width: min(90%, 320px); /* 宽度基于图片容器，最多 320px */
+    max-width: 100%;
+}
+
+/* Viewer reuses the card control */
+#viewer-card-slot {
+    flex: 1;
+    overflow: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem 0;
+}
+
+#image-viewer .group {
+    width: min(90vw, 720px);
+    margin: 0;
+}
+
+#image-viewer .group > .relative.h-64 {
+    height: auto !important;
+    max-height: 75vh;
+}
+
+#image-viewer .card-image {
+    max-height: 70vh;
+    width: auto;
+    max-width: 100%;
+}
+
+/* 动画 */
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes spin { to { transform: rotate(360deg); } }
+.animate-spin { animation: spin 1s linear infinite; display: inline-block; }
