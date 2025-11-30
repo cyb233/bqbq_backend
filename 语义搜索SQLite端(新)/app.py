@@ -624,12 +624,17 @@ class DataManager:
         return {"tags": result_list[offset:offset+limit], "total": total}
 
 
+
     def _build_search_query(self, include_tags, exclude_tags, min_tags=None, max_tags=None):
-        """构建 SQL 搜索语句，修复括号嵌套导致的语法错误"""
+        """
+        修正点 1: 修复了 max_tags=-1 时导致查询结果为空的问题。
+        修正点 2: 当 min_tags=0 且无上限时，跳过数量筛选，确保能搜到无标签图片。
+        修正点 3: 移除了导致 SQLite 语法错误的嵌套括号。
+        """
+        # 1. Include: 图片必须包含所有指定的标签 (INTERSECT)
         include_sqls = []
         params = []
         
-        # 1. Include: 包含标签 A, B -> Intersect
         for tag in include_tags:
             variants = self.get_all_variants(tag)
             placeholders = ','.join(['?'] * len(variants))
@@ -641,7 +646,7 @@ class DataManager:
             include_sqls.append(sql)
             params.extend(variants)
             
-        # 2. Exclude: 排除标签 C -> Except
+        # 2. Exclude: 图片不能包含任一指定的标签 (EXCEPT)
         exclude_sql = ""
         if exclude_tags:
             all_exclude_variants = []
@@ -657,73 +662,61 @@ class DataManager:
                 """
                 params.extend(all_exclude_variants)
 
-        # 3. Min/Max Tags Count -> Intersect
+        # 3. Min/Max Tags Count (数量筛选)
         count_filter_sql = ""
-        if min_tags is not None or max_tags is not None:
+        
+        # 解析参数
+        try:
             p_min = int(min_tags) if min_tags is not None else 0
-            p_max = int(max_tags) if max_tags is not None else 999999
+        except (ValueError, TypeError): 
+            p_min = 0
             
+        try:
+            p_max = int(max_tags) if max_tags is not None else -1
+        except (ValueError, TypeError): 
+            p_max = -1
+
+        # 逻辑修正：如果 max_tags 为负数 (如 -1)，视为无上限 (999999)
+        real_max = p_max if p_max >= 0 else 999999
+        
+        # 优化：只有当限制条件有效时（不是 0 到 无穷大），才生成 SQL
+        # 这样不仅解决了 max_tags=-1 的问题，还保证了 min_tags=0 时能搜到"无标签图片"
+        if not (p_min <= 0 and real_max >= 999999):
             count_filter_sql = f"""
                 SELECT image_md5 FROM image_tags 
                 GROUP BY image_md5 
-                HAVING COUNT(*) >= {p_min} AND COUNT(*) <= {p_max}
+                HAVING COUNT(*) >= {p_min} AND COUNT(*) <= {real_max}
             """
 
-        # --- 核心修复：扁平化拼接 SQL，移除多余括号 ---
+        # --- 组合最终 SQL (扁平链式结构) ---
         
-        # 初始集合
+        # 基础集合: 如果没有 include 条件，基础就是"所有图片"
         if include_sqls:
-            # 如果有包含标签，基底就是这些标签的交集
-            # 使用 "\n INTERSECT \n" 连接，避免一行过长
-            md5_set_sql = " \n INTERSECT \n ".join(include_sqls)
+            md5_set_sql = " INTERSECT ".join(include_sqls)
         else:
-            # 如果没有包含标签，基底是“所有图片”
-            # 注意：只有在后续有 exclude 或 count 限制时才需要这个基底，
-            # 如果全空，下面会有优化分支。
             md5_set_sql = "SELECT md5 FROM images"
 
-        # 叠加排除条件 (A EXCEPT B)
-        if exclude_sql:
-            md5_set_sql = f"{md5_set_sql} \n EXCEPT \n {exclude_sql}"
-            
-        # 叠加数量限制 (A INTERSECT B)
+        # 应用数量筛选 (INTERSECT)
         if count_filter_sql:
-            md5_set_sql = f"{md5_set_sql} \n INTERSECT \n {count_filter_sql}"
+            md5_set_sql = f"{md5_set_sql} INTERSECT {count_filter_sql}"
 
-        # 最终组装
-        if not include_tags and not exclude_tags and not count_filter_sql:
-            # 无任何筛选 -> 全量查询
-            final_sql = "SELECT md5, filename FROM images"
-        else:
-            # 有筛选 -> WHERE md5 IN (集合操作结果)
-            final_sql = f"SELECT md5, filename FROM images WHERE md5 IN ({md5_set_sql})"
+        # 应用排除筛选 (EXCEPT)
+        if exclude_sql:
+            md5_set_sql = f"{md5_set_sql} EXCEPT {exclude_sql}"
 
-        # 自动过滤 Trash (除非显式包含)
+        # 包裹进最终查询
+        final_sql = f"SELECT md5, filename FROM images WHERE md5 IN ({md5_set_sql})"
+
+        # 自动过滤回收站 (除非显式包含)
         has_trash_in_include = any(TRASH_TAG in self.get_all_variants(t) for t in include_tags)
         if not has_trash_in_include:
-            # 这里的逻辑是：从最终结果中排除掉 trash
-            # 使用 EXCEPT 语法比嵌套子查询更安全
             trash_filter_sql = f"""
                 SELECT image_md5 FROM image_tags 
                 JOIN tags ON image_tags.tag_id = tags.id 
                 WHERE tags.name = '{TRASH_TAG}'
             """
-            
-            # 构造一个新的查询： (原查询的MD5) EXCEPT (垃圾箱MD5)
-            # 然后再取这些 MD5 的完整信息
-            # 为了避免深层嵌套，我们修改 final_sql 的结构
-            
-            # 方法：将 trash 过滤直接作为 SQL 的一部分
-            # 既然 final_sql 是 "SELECT ... WHERE md5 IN (...)"
-            # 我们可以直接在 IN 内部追加 EXCEPT
-            
-            if "WHERE md5 IN" in final_sql:
-                # 截掉最后的 ')'
-                inner_query = final_sql.rsplit(')', 1)[0] 
-                final_sql = f"{inner_query} \n EXCEPT \n {trash_filter_sql})"
-            else:
-                # 全量查询的情况
-                final_sql = f"SELECT md5, filename FROM images WHERE md5 IN (SELECT md5 FROM images EXCEPT {trash_filter_sql})"
+            # 使用 EXCEPT 剔除回收站图片
+            final_sql = f"SELECT md5, filename FROM images WHERE md5 IN (SELECT md5 FROM ({final_sql}) EXCEPT {trash_filter_sql})"
 
         return final_sql, params
 
@@ -756,6 +749,7 @@ class DataManager:
         conn.close()
         return {"results": results, "total": total}
 
+
     def semantic_search(self, query_text, offset, limit):
         if not query_text: return {"results": [], "total": 0}
         
@@ -766,26 +760,18 @@ class DataManager:
         if not tokens: return {"results": [], "total": 0}
         
         # 2. 扩展同义词
-        # 逻辑：任一 token 命中图片标签（或同义词），即视为匹配
-        # 使用 LIKE 进行模糊匹配，或者精确匹配扩展后的词
-        
-        # 方案：构建 OR 查询
-        # SELECT DISTINCT i.* FROM images i JOIN image_tags it... JOIN tags t...
-        # WHERE t.name LIKE '%token1%' OR t.name LIKE '%token2%' ...
-        
         where_clauses = []
         params = []
         
         for token in tokens:
-            # 扩展同义词
             variants = self.get_all_variants(token)
-            # 对每个变体做模糊匹配 (LIKE %word%)
             for v in variants:
                 where_clauses.append("t.name LIKE ?")
                 params.append(f"%{v}%")
                 
         where_str = " OR ".join(where_clauses)
         
+        # Inner Query (defines alias 'i')
         sql = f"""
             SELECT DISTINCT i.md5, i.filename 
             FROM images i
@@ -794,7 +780,8 @@ class DataManager:
             WHERE {where_str}
         """
         
-        # 过滤 trash
+        # Outer Query (filters trash)
+        # Note: Alias 'i' is lost here, but 'filename' is available as a column
         sql = f"""
             SELECT * FROM ({sql}) 
             WHERE md5 NOT IN (
@@ -804,8 +791,8 @@ class DataManager:
             )
         """
         
-        # 分页
-        full_sql = f"{sql} ORDER BY i.filename LIMIT ? OFFSET ?"
+        # FIXED: Changed 'ORDER BY i.filename' to 'ORDER BY filename'
+        full_sql = f"{sql} ORDER BY filename LIMIT ? OFFSET ?"
         count_sql = f"SELECT COUNT(*) as cnt FROM ({sql})"
         
         conn = self.db.get_conn()
